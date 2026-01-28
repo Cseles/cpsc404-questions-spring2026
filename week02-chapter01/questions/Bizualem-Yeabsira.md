@@ -1,4 +1,4 @@
-# Week [NUMBER] Question - [CHAPTER TITLE]
+# Week 2 Question - Chapter 1 - Making Inevitable Conflict Productive
 
 **Student:** Yeabsira Bizualem
 **Date:** Jan 28, 2026
