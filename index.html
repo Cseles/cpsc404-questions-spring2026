@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPSC 404 — Question Picker</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Georgia', serif;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 1.5rem;
+            color: #a0c4ff;
+            text-align: center;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-bottom: 2rem;
+        }
+
+        select, button {
+            font-size: 1.2rem;
+            padding: 0.6rem 1.2rem;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+        }
+
+        select {
+            background: #16213e;
+            color: #e0e0e0;
+            border: 2px solid #0f3460;
+        }
+
+        button {
+            background: #0f3460;
+            color: #e0e0e0;
+            transition: background 0.2s;
+        }
+
+        button:hover:not(:disabled) {
+            background: #533483;
+        }
+
+        button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .status {
+            font-size: 1rem;
+            color: #7b8fa1;
+            margin-left: 0.5rem;
+        }
+
+        .question-card {
+            background: #16213e;
+            border: 2px solid #0f3460;
+            border-radius: 16px;
+            padding: 3rem;
+            max-width: 900px;
+            width: 100%;
+            min-height: 200px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .question-card .author {
+            font-size: 1rem;
+            color: #7b8fa1;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .question-card .content {
+            font-size: 1.6rem;
+            line-height: 1.6;
+            color: #f0f0f0;
+        }
+
+        .question-card .content h1,
+        .question-card .content h2,
+        .question-card .content h3 {
+            display: none;
+        }
+
+        .question-card .content p {
+            margin-bottom: 1rem;
+        }
+
+        .question-card .content strong {
+            color: #a0c4ff;
+        }
+
+        .placeholder {
+            text-align: center;
+            color: #7b8fa1;
+            font-size: 1.4rem;
+            font-style: italic;
+        }
+
+        .done-message {
+            text-align: center;
+            color: #ffc107;
+            font-size: 1.4rem;
+        }
+
+        @media (max-width: 600px) {
+            .question-card { padding: 1.5rem; }
+            .question-card .content { font-size: 1.2rem; }
+            h1 { font-size: 1.4rem; }
+        }
+    </style>
+</head>
+<body>
+    <h1>CPSC 404 — Discussion Question Picker</h1>
+
+    <div class="controls">
+        <select id="weekSelect" disabled>
+            <option value="">Loading weeks…</option>
+        </select>
+        <button id="pickBtn" disabled>Pick a Question</button>
+        <button id="resetBtn" disabled>Reset Pool</button>
+        <span class="status" id="status"></span>
+    </div>
+
+    <div class="question-card" id="card">
+        <div class="placeholder">Select a week to begin</div>
+    </div>
+
+    <script>
+        const REPO_OWNER = 'kousen';
+        const REPO_NAME = 'cpsc404-questions-spring2026';
+        const API_BASE = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents`;
+
+        const weekSelect = document.getElementById('weekSelect');
+        const pickBtn = document.getElementById('pickBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const card = document.getElementById('card');
+        const status = document.getElementById('status');
+
+        let allQuestions = [];   // full set for selected week
+        let remaining = [];      // not yet shown
+
+        // Extract a readable author name from the filename
+        function authorFromFilename(filename) {
+            return filename
+                .replace('.md', '')
+                .replace(/[-_]/g, ' ')
+                .replace(/\b\w/g, c => c.toUpperCase());
+        }
+
+        // Extract a friendly week label from the folder name
+        function weekLabel(dirname) {
+            return dirname
+                .replace(/-/g, ' ')
+                .replace(/\b\w/g, c => c.toUpperCase());
+        }
+
+        // Load the list of week folders from the repo
+        async function loadWeeks() {
+            try {
+                const res = await fetch(API_BASE);
+                const items = await res.json();
+                const weeks = items
+                    .filter(item => item.type === 'dir' && item.name.startsWith('week'))
+                    .sort((a, b) => a.name.localeCompare(b.name));
+
+                weekSelect.innerHTML = '<option value="">— Choose a week —</option>';
+                for (const w of weeks) {
+                    const opt = document.createElement('option');
+                    opt.value = w.name;
+                    opt.textContent = weekLabel(w.name);
+                    weekSelect.appendChild(opt);
+                }
+                weekSelect.disabled = false;
+            } catch (err) {
+                card.innerHTML = `<div class="placeholder">Error loading weeks: ${err.message}</div>`;
+            }
+        }
+
+        // Load all questions for a given week
+        async function loadQuestions(weekDir) {
+            pickBtn.disabled = true;
+            resetBtn.disabled = true;
+            card.innerHTML = '<div class="placeholder">Loading questions…</div>';
+            status.textContent = '';
+
+            try {
+                const res = await fetch(`${API_BASE}/${weekDir}/questions`);
+                const files = await res.json();
+                const mdFiles = files.filter(f => f.name.endsWith('.md') && f.name !== '.gitkeep');
+
+                // Fetch all question contents in parallel
+                const questions = await Promise.all(
+                    mdFiles.map(async (f) => {
+                        const r = await fetch(f.download_url);
+                        const text = await r.text();
+                        return { author: authorFromFilename(f.name), body: text };
+                    })
+                );
+
+                allQuestions = questions;
+                remaining = [...questions];
+                updateStatus();
+                pickBtn.disabled = false;
+                resetBtn.disabled = false;
+                card.innerHTML = '<div class="placeholder">Ready — click "Pick a Question"</div>';
+            } catch (err) {
+                card.innerHTML = `<div class="placeholder">Error loading questions: ${err.message}</div>`;
+            }
+        }
+
+        function updateStatus() {
+            status.textContent = `${remaining.length} of ${allQuestions.length} remaining`;
+        }
+
+        function showQuestion(q) {
+            const rendered = marked.parse(q.body);
+            card.innerHTML = `
+                <div class="author">${q.author}</div>
+                <div class="content">${rendered}</div>
+            `;
+        }
+
+        function pickRandom() {
+            if (remaining.length === 0) {
+                card.innerHTML = '<div class="done-message">All questions have been shown!<br>Click "Reset Pool" to start over.</div>';
+                pickBtn.disabled = true;
+                updateStatus();
+                return;
+            }
+
+            const index = Math.floor(Math.random() * remaining.length);
+            const question = remaining.splice(index, 1)[0];
+            showQuestion(question);
+            updateStatus();
+
+            if (remaining.length === 0) {
+                pickBtn.disabled = true;
+            }
+        }
+
+        // Event listeners
+        weekSelect.addEventListener('change', () => {
+            const week = weekSelect.value;
+            if (week) {
+                loadQuestions(week);
+            } else {
+                allQuestions = [];
+                remaining = [];
+                pickBtn.disabled = true;
+                resetBtn.disabled = true;
+                status.textContent = '';
+                card.innerHTML = '<div class="placeholder">Select a week to begin</div>';
+            }
+        });
+
+        pickBtn.addEventListener('click', pickRandom);
+
+        resetBtn.addEventListener('click', () => {
+            remaining = [...allQuestions];
+            updateStatus();
+            pickBtn.disabled = false;
+            card.innerHTML = '<div class="placeholder">Pool reset — click "Pick a Question"</div>';
+        });
+
+        // Start
+        loadWeeks();
+    </script>
+</body>
+</html>
